@@ -68,8 +68,19 @@ def run_agent(user_message: str, history: list[dict] | None = None) -> tuple[str
             turn, resp.stop_reason, resp.usage.input_tokens, resp.usage.output_tokens,
         )
 
-        # アシスタント応答をhistoryへ
-        messages.append({"role": "assistant", "content": resp.content})
+        # アシスタント応答をhistoryへ（SDKオブジェクトをJSON保存可能なdictに変換）
+        assistant_content = []
+        for block in resp.content:
+            if block.type == "text":
+                assistant_content.append({"type": "text", "text": block.text})
+            elif block.type == "tool_use":
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                })
+        messages.append({"role": "assistant", "content": assistant_content})
 
         # ツール呼び出しがなければ終了
         if resp.stop_reason != "tool_use":
