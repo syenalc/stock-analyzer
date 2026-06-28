@@ -1,3 +1,4 @@
+import base64
 import os
 import sys
 from datetime import datetime, timedelta
@@ -182,6 +183,11 @@ with tab_chat:
     for idx, msg in enumerate(st.session_state.chat_history):
         if msg["role"] == "user":
             with st.chat_message("user"):
+                for img in msg.get("images") or []:
+                    try:
+                        st.image(base64.b64decode(img["data"]))
+                    except Exception:
+                        st.caption("[画像表示失敗]")
                 render_truncated(msg["display"], key=f"u_{idx}")
         elif msg["role"] == "assistant_display":
             with st.chat_message("assistant"):
@@ -189,12 +195,42 @@ with tab_chat:
                 if msg.get("tools"):
                     st.caption(f"🔧 使用ツール: {', '.join(msg['tools'])}")
 
-    if prompt := st.chat_input("質問を入力..."):
-        st.session_state.chat_history.append({"role": "user", "display": prompt})
+    chat_value = st.chat_input(
+        "質問を入力...",
+        accept_file="multiple",
+        file_type=["png", "jpg", "jpeg", "webp", "gif"],
+    )
+    if chat_value:
+        prompt = (chat_value.text or "").strip() if hasattr(chat_value, "text") else str(chat_value)
+        raw_files = getattr(chat_value, "files", None) or []
+
+        images = []
+        for f in raw_files:
+            try:
+                data_b64 = base64.b64encode(f.getvalue()).decode("ascii")
+                mime = f.type or "image/png"
+                if not mime.startswith("image/"):
+                    continue
+                images.append({"media_type": mime, "data": data_b64})
+            except Exception as e:
+                st.warning(f"画像読み込み失敗: {e}")
+
+        if not prompt and images:
+            prompt = "添付した画像を分析してください"
+
+        if not prompt and not images:
+            st.stop()
+
+        st.session_state.chat_history.append({
+            "role": "user",
+            "display": prompt,
+            "images": images,
+        })
         with st.chat_message("user"):
+            for img in images:
+                st.image(base64.b64decode(img["data"]))
             render_truncated(prompt, key="u_new")
 
-        # Anthropic用のhistoryを構築
         api_history = st.session_state.get("api_history", [])
         with st.chat_message("assistant"):
             with st.spinner("考え中..."):
@@ -202,6 +238,7 @@ with tab_chat:
                     prompt,
                     history=api_history,
                     model=AVAILABLE_MODELS[st.session_state.selected_model_label],
+                    images=images,
                 )
             st.markdown(answer)
             if tool_trace:

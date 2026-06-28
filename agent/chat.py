@@ -65,17 +65,28 @@ def _get_client() -> anthropic.Anthropic:
     return _client
 
 
-def run_agent(user_message: str, history: list[dict] | None = None, model: str = DEFAULT_MODEL) -> tuple[str, list[dict], list[str]]:
+def run_agent(
+    user_message: str,
+    history: list[dict] | None = None,
+    model: str = DEFAULT_MODEL,
+    images: list[dict] | None = None,
+) -> tuple[str, list[dict], list[str]]:
     """エージェントを1ターン実行
 
-    Returns:
-        (assistant_text, new_history, tool_trace)
-        - new_history: 次回のhistoryとして渡せる完全なmessages配列
-        - tool_trace: 実行したツール名のログ
+    images: list of {"media_type": "image/png", "data": "<base64>"}
     """
     client = _get_client()
     messages = list(history or [])
-    messages.append({"role": "user", "content": user_message})
+
+    if images:
+        content_blocks = [{
+            "type": "image",
+            "source": {"type": "base64", "media_type": img["media_type"], "data": img["data"]},
+        } for img in images]
+        content_blocks.append({"type": "text", "text": user_message or "添付画像を分析してください"})
+        messages.append({"role": "user", "content": content_blocks})
+    else:
+        messages.append({"role": "user", "content": user_message})
 
     tool_trace = []
     final_text = ""
