@@ -232,17 +232,24 @@ with tab_chat:
             render_truncated(prompt, key="u_new")
 
         api_history = st.session_state.get("api_history", [])
+        answer = None
+        new_api_history = api_history
+        tool_trace = []
         with st.chat_message("assistant"):
-            with st.spinner("考え中..."):
-                answer, new_api_history, tool_trace = run_agent(
-                    prompt,
-                    history=api_history,
-                    model=AVAILABLE_MODELS[st.session_state.selected_model_label],
-                    images=images,
-                )
-            st.markdown(answer)
-            if tool_trace:
-                st.caption(f"🔧 使用ツール: {', '.join(tool_trace)}")
+            try:
+                with st.spinner("考え中..."):
+                    answer, new_api_history, tool_trace = run_agent(
+                        prompt,
+                        history=api_history,
+                        model=AVAILABLE_MODELS[st.session_state.selected_model_label],
+                        images=images,
+                    )
+                st.markdown(answer)
+                if tool_trace:
+                    st.caption(f"🔧 使用ツール: {', '.join(tool_trace)}")
+            except Exception as e:
+                answer = f"⚠️ エラー発生: `{type(e).__name__}: {e}`\n\n再度質問するか、もう少し短い質問に分割してみてください。"
+                st.error(answer)
 
         st.session_state.api_history = new_api_history
         st.session_state.chat_history.append({
