@@ -16,8 +16,6 @@ from utils.config import get_secret
 from db.supabase_client import (
     fetch_prices,
     fetch_latest_tweets_for_ticker,
-    fetch_manual_notes,
-    insert_manual_note,
     insert_manual_note_group,
     fetch_all_manual_notes_grouped,
     update_manual_note_group,
@@ -216,28 +214,17 @@ with tab_data:
                 if metrics:
                     st.caption(f"♥{metrics.get('like_count', 0)} 🔁{metrics.get('retweet_count', 0)} 💬{metrics.get('reply_count', 0)}")
 
-    st.subheader(f"📝 {view_ticker} 手動メモ")
-    notes = fetch_manual_notes(view_ticker, limit=10)
-    if notes:
-        for n in notes:
-            with st.expander(f"{n.get('title') or '(無題)'} — {n.get('added_at', '')[:16]}"):
-                if n.get("url"):
-                    st.markdown(f"🔗 [{n['url']}]({n['url']})")
-                st.write(n["content"])
-
 # ============ TAB 3: メモ管理 ============
 SOURCE_OPTIONS = ["article", "blog", "report", "memo", "other"]
 
 with tab_notes:
-    st.subheader("📚 保存済みメモ一覧")
-    filter_ticker = st.selectbox("銘柄フィルタ", ["全銘柄"] + TICKERS, key="note_filter")
+    st.subheader("📚 共通ナレッジ一覧")
+    st.caption("全銘柄共通の知識として保存・参照されます")
     try:
         groups = fetch_all_manual_notes_grouped(limit=200)
     except Exception as e:
         groups = []
         st.error(f"メモ取得失敗: {e}")
-    if filter_ticker != "全銘柄":
-        groups = [g for g in groups if filter_ticker in g["tickers"]]
 
     if not groups:
         st.info("該当メモなし。下のフォームから追加してください。")
@@ -245,13 +232,10 @@ with tab_notes:
         st.caption(f"{len(groups)} 件")
         for g in groups:
             gid = g["group_id"]
-            label = f"{g['title'] or '(無題)'} — {(g['added_at'] or '')[:16]} [{', '.join(g['tickers'])}]"
+            label = f"{g['title'] or '(無題)'} — {(g['added_at'] or '')[:16]}"
             with st.expander(label):
                 edit_key = f"edit_{gid}"
                 if st.session_state.get(edit_key, False):
-                    new_tickers = st.multiselect(
-                        "対象銘柄", TICKERS, default=g["tickers"], key=f"et_{gid}"
-                    )
                     new_title = st.text_input("タイトル", value=g["title"] or "", key=f"eti_{gid}")
                     new_url = st.text_input("URL", value=g["url"] or "", key=f"eu_{gid}")
                     src_idx = SOURCE_OPTIONS.index(g["source"]) if g["source"] in SOURCE_OPTIONS else 3
@@ -263,12 +247,10 @@ with tab_notes:
                     if c1.button("💾 保存", key=f"sv_{gid}", type="primary"):
                         if not new_content.strip():
                             st.error("内容は必須です")
-                        elif not new_tickers:
-                            st.error("銘柄を1つ以上選択してください")
                         else:
                             try:
                                 update_manual_note_group(
-                                    gid, new_tickers, new_content.strip(),
+                                    gid, TICKERS, new_content.strip(),
                                     new_title.strip(), new_source, new_url.strip(),
                                 )
                                 st.session_state[edit_key] = False
@@ -296,16 +278,9 @@ with tab_notes:
                             st.error(f"削除失敗: {e}")
 
     st.divider()
-    st.subheader("➕ 新規メモを追加")
-    st.caption("ネット記事の要約や自分の調査メモを保存。チャットで参照される。")
+    st.subheader("➕ 新規ナレッジを追加")
+    st.caption("ネット記事の要約・投資方針・業界知識など。全銘柄共通として保存され、チャットで自動参照されます。")
     with st.form("note_form", clear_on_submit=True):
-        note_tickers = st.multiselect(
-            "対象銘柄（複数選択可）",
-            TICKERS,
-            default=TICKERS,
-            key="note_tickers",
-            help="半導体株全般の話など複数銘柄に関連する場合は全選択推奨",
-        )
         note_title = st.text_input("タイトル（任意）")
         note_url = st.text_input("URL（任意）")
         note_source = st.selectbox("ソース種別", SOURCE_OPTIONS)
@@ -313,17 +288,15 @@ with tab_notes:
         if st.form_submit_button("💾 保存", type="primary"):
             if not note_content.strip():
                 st.error("内容は必須です")
-            elif not note_tickers:
-                st.error("対象銘柄を1つ以上選択してください")
             else:
                 try:
                     insert_manual_note_group(
-                        tickers=note_tickers,
+                        tickers=TICKERS,
                         content=note_content.strip(),
                         title=note_title.strip(),
                         url=note_url.strip(),
                         source=note_source,
                     )
-                    st.success(f"{', '.join(note_tickers)} にメモを追加しました")
+                    st.success("ナレッジを追加しました")
                 except Exception as e:
                     st.error(f"保存失敗: {e}")

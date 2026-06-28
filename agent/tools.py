@@ -14,10 +14,11 @@ from collectors.x_collector import (
 from db.supabase_client import (
     fetch_prices as db_fetch_prices,
     fetch_latest_tweets_for_ticker,
-    fetch_manual_notes,
-    insert_manual_note,
+    fetch_all_manual_notes_grouped,
+    insert_manual_note_group,
     get_client,
 )
+from utils.config import get_secret
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -107,32 +108,34 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "get_manual_notes",
-        "description": "ある銘柄について手動で保存した補助メモを取得する。",
+        "description": (
+            "保存済みの共通ナレッジ（ユーザーの投資方針・業界知識・経済指標解釈・記事要約など）を取得する。"
+            "銘柄横断の共通知識として保存されているため、どの質問でも参照すべき。"
+            "ユーザーの考え方を踏まえた回答をするため、最初に必ず呼ぶこと。"
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "ticker": {"type": "string"},
-                "limit": {"type": "integer", "default": 10},
+                "limit": {"type": "integer", "default": 50},
             },
-            "required": ["ticker"],
         },
     },
     {
         "name": "save_manual_note",
         "description": (
-            "ユーザーが共有したネット記事の要約・自分のメモ等をSupabaseに保存する。"
-            "「このメモを保存しておいて」と頼まれた時に使う。"
+            "ユーザーが共有したネット記事の要約・投資方針・業界知識などを"
+            "共通ナレッジとしてSupabaseに保存する。"
+            "「このメモを保存しておいて」「これ覚えておいて」と頼まれた時に使う。"
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "ticker": {"type": "string", "description": "対象銘柄"},
                 "content": {"type": "string", "description": "保存する内容"},
                 "title": {"type": "string", "description": "見出し（任意）"},
                 "url": {"type": "string", "description": "URL（任意）"},
                 "source": {"type": "string", "description": "出典種別", "default": "memo"},
             },
-            "required": ["ticker", "content"],
+            "required": ["content"],
         },
     },
 ]
@@ -214,14 +217,28 @@ def _tool_get_price_history(ticker: str, days: int = 30) -> dict:
     }
 
 
-def _tool_get_manual_notes(ticker: str, limit: int = 10) -> dict:
-    notes = fetch_manual_notes(ticker.upper(), limit=limit)
+def _all_tickers() -> list[str]:
+    return [t.strip() for t in (get_secret("TARGET_TICKERS", "") or "").split(",") if t.strip()]
+
+
+def _tool_get_manual_notes(limit: int = 50) -> dict:
+    groups = fetch_all_manual_notes_grouped(limit=limit)
+    notes = [{
+        "title": g.get("title"),
+        "content": g.get("content"),
+        "url": g.get("url"),
+        "source": g.get("source"),
+        "added_at": g.get("added_at"),
+    } for g in groups]
     return {"count": len(notes), "notes": notes}
 
 
-def _tool_save_manual_note(ticker: str, content: str, title: str = "", url: str = "", source: str = "memo") -> dict:
-    note = insert_manual_note(ticker.upper(), content, title=title, url=url, source=source)
-    return {"ok": True, "saved": note}
+def _tool_save_manual_note(content: str, title: str = "", url: str = "", source: str = "memo") -> dict:
+    tickers = _all_tickers()
+    if not tickers:
+        return {"ok": False, "error": "TARGET_TICKERS未設定"}
+    gid = insert_manual_note_group(tickers, content, title=title, url=url, source=source)
+    return {"ok": True, "group_id": gid, "title": title, "content_preview": content[:80]}
 
 
 TOOL_HANDLERS = {
