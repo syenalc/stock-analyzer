@@ -29,15 +29,23 @@ TOOL_DEFINITIONS = [
     {
         "name": "fetch_user_tweets",
         "description": (
-            "指定したXユーザーのツイートを取得してSupabaseに保存する。"
+            "指定したXユーザーのツイートを取得してSupabaseに保存する（X API課金: 約$0.005/件）。"
             "ユーザーが「〜のツイートを取って」「〜の今日の発言を取得」と明示的に指示した時のみ使う。"
+            "ページング対応で start_time まで自動で遡るが、max_total に達したら打ち切る。"
+            "戻り値の hit_cap=true なら上限に達しており、実際にはもっと古いツイートが存在する。"
+            "oldest_tweet_at を確認して、ユーザーが要求した期間まで遡れたか必ず検証すること。"
             "ティッカー紐付けは config/x_users.json の設定に従う。"
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "username": {"type": "string", "description": "Xユーザー名（@抜き）"},
-                "days": {"type": "integer", "description": "過去何日分を取得するか", "default": 1},
+                "days": {"type": "integer", "description": "過去何日分まで遡るか", "default": 1},
+                "max_total": {
+                    "type": "integer",
+                    "description": "最大取得件数の上限（コスト制御）。長期間取得時は明示的に増やすこと（例: 30日=300, 90日=1000）",
+                    "default": 500,
+                },
             },
             "required": ["username"],
         },
@@ -125,9 +133,8 @@ TOOL_DEFINITIONS = [
 
 # ============ ツール実装 ============
 
-def _tool_fetch_user_tweets(username: str, days: int = 1) -> dict:
-    result = fetch_user_tweets_oneshot(username, days=days)
-    return {"ok": True, **result}
+def _tool_fetch_user_tweets(username: str, days: int = 1, max_total: int = 500) -> dict:
+    return fetch_user_tweets_oneshot(username, days=days, max_total=max_total)
 
 
 def _tool_list_known_users() -> dict:

@@ -141,15 +141,17 @@ def collect_all_tweets(all_tickers: list[str], persist: bool = True) -> dict:
     return by_ticker
 
 
-def fetch_user_tweets_oneshot(username: str, days: int = 1) -> dict:
-    """指定1ユーザーのツイートを取得しSupabaseに保存（エージェントから呼ばれる）"""
+def fetch_user_tweets_oneshot(username: str, days: int = 1, max_total: int = 500) -> dict:
+    """指定1ユーザーのツイートを取得しSupabaseに保存（エージェントから呼ばれる）
+
+    tweepy.Paginator で start_time まで遡る。max_total で取得上限を制御。
+    """
     if not TWEEPY_AVAILABLE:
         return {"ok": False, "error": "tweepy未インストール"}
     client = _get_client()
     if client is None:
         return {"ok": False, "error": "X_BEARER_TOKEN未設定"}
 
-    # x_users.json から ticker mapping を引く
     user_config = load_user_config()
     user_entry = next((u for u in user_config if u["username"] == username), None)
     if not user_entry:
@@ -164,24 +166,51 @@ def fetch_user_tweets_oneshot(username: str, days: int = 1) -> dict:
         user_resp = _fetch_user(client, username)
         if not user_resp.data:
             return {"ok": False, "error": f"@{username} が見つかりません"}
-        tweets_resp = _fetch_user_tweets(client, user_resp.data.id, start_time, max_results=100)
+
         tweets = []
-        if tweets_resp.data:
-            for tweet in tweets_resp.data:
+        pages = 0
+        hit_cap = False
+        paginator = tweepy.Paginator(
+            client.get_users_tweets,
+            id=user_resp.data.id,
+            start_time=start_time,
+            max_results=100,
+            tweet_fields=["created_at", "text", "public_metrics"],
+            exclude=["retweets", "replies"],
+        )
+        for response in paginator:
+            pages += 1
+            if not response.data:
+                continue
+            for tweet in response.data:
                 tweets.append({
                     "id": tweet.id,
                     "text": tweet.text,
                     "created_at": tweet.created_at.isoformat() if tweet.created_at else None,
                     "metrics": tweet.public_metrics,
                 })
+                if len(tweets) >= max_total:
+                    hit_cap = True
+                    break
+            if hit_cap:
+                break
+
         for ticker in target_tickers:
             if tweets:
                 insert_tweets(ticker, username, tweets)
+
+        oldest = min((t["created_at"] for t in tweets if t["created_at"]), default=None)
+        newest = max((t["created_at"] for t in tweets if t["created_at"]), default=None)
         return {
             "ok": True,
             "username": username,
             "display_name": user_entry["display_name"],
             "fetched": len(tweets),
+            "pages": pages,
+            "hit_cap": hit_cap,
+            "max_total": max_total,
+            "oldest_tweet_at": oldest,
+            "newest_tweet_at": newest,
             "linked_tickers": target_tickers,
             "days": days,
         }
