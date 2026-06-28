@@ -226,7 +226,13 @@ with tab_notes:
     st.subheader("📝 手動メモを追加")
     st.caption("ネット記事の要約や自分の調査メモを保存。チャットで参照される。")
     with st.form("note_form", clear_on_submit=True):
-        note_ticker = st.selectbox("対象銘柄", TICKERS, key="note_ticker")
+        note_tickers = st.multiselect(
+            "対象銘柄（複数選択可）",
+            TICKERS,
+            default=TICKERS,
+            key="note_tickers",
+            help="半導体株全般の話など複数銘柄に関連する場合は全選択推奨",
+        )
         note_title = st.text_input("タイトル（任意）")
         note_url = st.text_input("URL（任意）")
         note_source = st.selectbox("ソース種別", ["article", "blog", "report", "memo", "other"])
@@ -234,15 +240,24 @@ with tab_notes:
         if st.form_submit_button("💾 保存", type="primary"):
             if not note_content.strip():
                 st.error("内容は必須です")
+            elif not note_tickers:
+                st.error("対象銘柄を1つ以上選択してください")
             else:
-                try:
-                    insert_manual_note(
-                        ticker=note_ticker,
-                        content=note_content.strip(),
-                        title=note_title.strip(),
-                        url=note_url.strip(),
-                        source=note_source,
-                    )
-                    st.success(f"{note_ticker} にメモを追加しました")
-                except Exception as e:
-                    st.error(f"保存失敗: {e}")
+                errors = []
+                saved = []
+                for tk in note_tickers:
+                    try:
+                        insert_manual_note(
+                            ticker=tk,
+                            content=note_content.strip(),
+                            title=note_title.strip(),
+                            url=note_url.strip(),
+                            source=note_source,
+                        )
+                        saved.append(tk)
+                    except Exception as e:
+                        errors.append(f"{tk}: {e}")
+                if saved:
+                    st.success(f"{', '.join(saved)} にメモを追加しました")
+                if errors:
+                    st.error("一部失敗: " + " / ".join(errors))
