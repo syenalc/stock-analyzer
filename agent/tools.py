@@ -26,6 +26,14 @@ logger = get_logger(__name__)
 
 # ============ ツール定義 (Claude API tool_use 用) ============
 
+# Anthropic サーバサイドツール（API側で実行される）
+WEB_SEARCH_TOOL = {
+    "type": "web_search_20250305",
+    "name": "web_search",
+    "max_uses": 5,  # 1回の質問で最大5回まで検索（コスト制御）
+}
+
+
 TOOL_DEFINITIONS = [
     {
         "name": "fetch_user_tweets",
