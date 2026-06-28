@@ -2,6 +2,7 @@
 エージェント型チャット
 Claude API を tool_use モードで呼び、必要に応じて agent.tools のツールを実行する
 """
+import os
 import anthropic
 
 from agent.tools import TOOL_DEFINITIONS, execute_tool
@@ -10,10 +11,14 @@ from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-MODEL = "claude-sonnet-4-6"
+AVAILABLE_MODELS = {
+    "Sonnet 4.6 (高速・低コスト)": "claude-sonnet-4-6",
+    "Opus 4.7 (高精度・高コスト)": "claude-opus-4-7",
+}
+DEFAULT_MODEL = "claude-sonnet-4-6"
 MAX_TOOL_TURNS = 8  # 暴走防止
 
-SYSTEM_PROMPT = """あなたは米国株の投資アシスタントです。
+_BASE_SYSTEM_PROMPT = """あなたは米国株の投資アシスタントです。
 ユーザーの自然言語の質問に答えるため、以下のツールを必要に応じて呼び出してください。
 
 利用方針:
@@ -30,6 +35,25 @@ SYSTEM_PROMPT = """あなたは米国株の投資アシスタントです。
 回答は日本語で。
 """
 
+
+def _load_user_context() -> str:
+    """CLAUDE.md (ローカル) または USER_CONTEXT secret (クラウド) からユーザーコンテキストを読む"""
+    path = os.path.join(os.path.dirname(__file__), "..", "CLAUDE.md")
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read().strip()
+        except Exception as e:
+            logger.warning("CLAUDE.md読み込み失敗: %s", e)
+    return (get_secret("USER_CONTEXT", "") or "").strip()
+
+
+def _build_system_prompt() -> str:
+    ctx = _load_user_context()
+    if ctx:
+        return _BASE_SYSTEM_PROMPT + f"\n\n---\n## ユーザーコンテキスト（最優先で参照）\n\n{ctx}"
+    return _BASE_SYSTEM_PROMPT
+
 _client = None
 
 
@@ -40,7 +64,7 @@ def _get_client() -> anthropic.Anthropic:
     return _client
 
 
-def run_agent(user_message: str, history: list[dict] | None = None) -> tuple[str, list[dict], list[str]]:
+def run_agent(user_message: str, history: list[dict] | None = None, model: str = DEFAULT_MODEL) -> tuple[str, list[dict], list[str]]:
     """エージェントを1ターン実行
 
     Returns:
@@ -54,12 +78,13 @@ def run_agent(user_message: str, history: list[dict] | None = None) -> tuple[str
 
     tool_trace = []
     final_text = ""
+    system_prompt = _build_system_prompt()
 
     for turn in range(MAX_TOOL_TURNS):
         resp = client.messages.create(
-            model=MODEL,
+            model=model,
             max_tokens=2048,
-            system=SYSTEM_PROMPT,
+            system=system_prompt,
             tools=TOOL_DEFINITIONS,
             messages=messages,
         )

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv()
 
-from agent.chat import run_agent
+from agent.chat import run_agent, AVAILABLE_MODELS
 from collectors.x_collector import get_display_name, load_user_config
 from utils.config import get_secret
 from db.supabase_client import (
@@ -61,7 +61,25 @@ if "chat_history" not in st.session_state:
 if "api_history" not in st.session_state:
     st.session_state.api_history = []
 
+if "selected_model_label" not in st.session_state:
+    default_label = next(
+        (k for k, v in AVAILABLE_MODELS.items() if v == "claude-sonnet-4-6"),
+        list(AVAILABLE_MODELS.keys())[0],
+    )
+    st.session_state.selected_model_label = default_label
+
 with st.sidebar:
+    st.subheader("🧠 AIモデル")
+    model_labels = list(AVAILABLE_MODELS.keys())
+    st.selectbox(
+        "モデル選択",
+        model_labels,
+        index=model_labels.index(st.session_state.selected_model_label),
+        key="selected_model_label",
+        label_visibility="collapsed",
+    )
+
+    st.divider()
     st.header("ℹ️ 監視中")
     st.caption(f"銘柄: {', '.join(TICKERS)}")
     with st.expander("Xユーザー"):
@@ -131,7 +149,11 @@ with tab_chat:
         api_history = st.session_state.get("api_history", [])
         with st.chat_message("assistant"):
             with st.spinner("考え中..."):
-                answer, new_api_history, tool_trace = run_agent(prompt, history=api_history)
+                answer, new_api_history, tool_trace = run_agent(
+                    prompt,
+                    history=api_history,
+                    model=AVAILABLE_MODELS[st.session_state.selected_model_label],
+                )
             st.markdown(answer)
             if tool_trace:
                 st.caption(f"🔧 使用ツール: {', '.join(tool_trace)}")

@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 .streamlit/secrets.toml
+CLAUDE.md
 data/
 logs/
 __pycache__/
