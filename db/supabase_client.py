@@ -81,9 +81,22 @@ def insert_tweets(ticker: str, username: str, tweets: list[dict]) -> int:
         "author": username,
         "metrics": t.get("metrics", {}),
     } for t in tweets]
-    get_client().table("tweets").upsert(rows, on_conflict="tweet_id").execute()
+    get_client().table("tweets").upsert(rows, on_conflict="tweet_id,ticker").execute()
     logger.info("upserted %d tweets for %s/%s", len(rows), ticker, username)
     return len(rows)
+
+
+def get_latest_posted_at_for_author(username: str) -> Optional[datetime]:
+    res = get_client().table("tweets").select("posted_at")\
+        .eq("author", username).order("posted_at", desc=True).limit(1).execute()
+    if not res.data or not res.data[0].get("posted_at"):
+        return None
+    ts = res.data[0]["posted_at"]
+    if ts.endswith("Z"):
+        ts = ts[:-1] + "+00:00"
+    elif "+" not in ts[10:] and "-" not in ts[10:]:
+        ts += "+00:00"
+    return datetime.fromisoformat(ts)
 
 
 def insert_signal(ticker: str, signal: dict, model: str = "claude-sonnet-4-6") -> dict:

@@ -6,7 +6,7 @@ import os
 import json
 from datetime import datetime, timedelta, timezone
 
-from db.supabase_client import insert_tweets
+from db.supabase_client import insert_tweets, get_latest_posted_at_for_author
 from utils.config import get_secret
 from utils.logging_config import get_logger
 from utils.retry import default_retry
@@ -141,10 +141,12 @@ def collect_all_tweets(all_tickers: list[str], persist: bool = True) -> dict:
     return by_ticker
 
 
-def fetch_user_tweets_oneshot(username: str, days: int = 1, max_total: int = 500) -> dict:
+def fetch_user_tweets_oneshot(username: str, days: int = 1, max_total: int = 500, incremental: bool = True) -> dict:
     """指定1ユーザーのツイートを取得しSupabaseに保存（エージェントから呼ばれる）
 
     tweepy.Paginator で start_time まで遡る。max_total で取得上限を制御。
+    incremental=True (デフォルト): DBにある最新ツイートより新しい分だけ取る（API課金節約）。
+    incremental=False: 指定 days 全期間を取り直す（過去遡及/バックフィル用）。
     """
     if not TWEEPY_AVAILABLE:
         return {"ok": False, "error": "tweepy未インストール"}
@@ -161,7 +163,32 @@ def fetch_user_tweets_oneshot(username: str, days: int = 1, max_total: int = 500
     all_tickers = [t.strip() for t in (get_secret("TARGET_TICKERS", "") or "").split(",") if t.strip()]
     target_tickers = resolve_tickers(target_tickers_raw, all_tickers)
 
-    start_time = datetime.now(timezone.utc) - timedelta(days=days)
+    requested_start = datetime.now(timezone.utc) - timedelta(days=days)
+    latest_in_db = None
+    if incremental:
+        try:
+            latest_in_db = get_latest_posted_at_for_author(username)
+        except Exception as e:
+            logger.warning("latest_posted_at取得失敗 (%s): %s", username, e)
+
+    if latest_in_db and latest_in_db > requested_start:
+        start_time = latest_in_db + timedelta(seconds=1)
+        skipped_existing = True
+    else:
+        start_time = requested_start
+        skipped_existing = False
+
+    # X API は now-10秒以内の start_time を受け付けない
+    if start_time >= datetime.now(timezone.utc) - timedelta(seconds=10):
+        return {
+            "ok": True,
+            "username": username,
+            "fetched": 0,
+            "message": "DBに既に最新ツイートあり。取得スキップ",
+            "incremental": incremental,
+            "latest_in_db": latest_in_db.isoformat() if latest_in_db else None,
+        }
+
     try:
         user_resp = _fetch_user(client, username)
         if not user_resp.data:
@@ -213,6 +240,9 @@ def fetch_user_tweets_oneshot(username: str, days: int = 1, max_total: int = 500
             "newest_tweet_at": newest,
             "linked_tickers": target_tickers,
             "days": days,
+            "incremental": incremental,
+            "skipped_existing": skipped_existing,
+            "start_time_used": start_time.isoformat(),
         }
     except Exception as e:
         logger.exception("oneshot fetch failed for @%s: %s", username, e)
