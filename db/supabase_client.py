@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Optional
@@ -68,6 +69,74 @@ def mark_notes_used(note_ids: list[int]) -> None:
         return
     get_client().table("manual_notes").update({"used_in_analysis": True})\
         .in_("id", note_ids).execute()
+
+
+def insert_manual_note_group(tickers: list[str], content: str, title: str = "",
+                              source: str = "memo", url: str = "") -> str:
+    """同一 group_id で複数銘柄に紐付けて保存。group_id を返す"""
+    if not tickers:
+        raise ValueError("tickersが空です")
+    gid = str(uuid.uuid4())
+    rows = [{
+        "ticker": t,
+        "content": content,
+        "title": title,
+        "source": source,
+        "url": url,
+        "group_id": gid,
+    } for t in tickers]
+    get_client().table("manual_notes").insert(rows).execute()
+    logger.info("inserted manual note group %s for %s", gid, tickers)
+    return gid
+
+
+def fetch_all_manual_notes_grouped(limit: int = 200) -> list[dict]:
+    """全メモをグループ集約して返す。tickersリストとrow_idsを含む"""
+    res = get_client().table("manual_notes").select("*")\
+        .order("added_at", desc=True).limit(limit).execute()
+    rows = res.data or []
+    groups: dict[str, dict] = {}
+    for r in rows:
+        gid = r.get("group_id") or f"single-{r['id']}"
+        if gid not in groups:
+            groups[gid] = {
+                "group_id": gid,
+                "title": r.get("title"),
+                "content": r.get("content"),
+                "url": r.get("url"),
+                "source": r.get("source") or "memo",
+                "added_at": r.get("added_at"),
+                "tickers": [],
+                "row_ids": [],
+            }
+        groups[gid]["tickers"].append(r["ticker"])
+        groups[gid]["row_ids"].append(r["id"])
+    return sorted(groups.values(), key=lambda g: g["added_at"] or "", reverse=True)
+
+
+def update_manual_note_group(group_id: str, tickers: list[str],
+                              content: str, title: str = "",
+                              source: str = "memo", url: str = "") -> None:
+    """group_id 内の既存行を削除→新規ticker群で再挿入"""
+    client = get_client()
+    client.table("manual_notes").delete().eq("group_id", group_id).execute()
+    if not tickers:
+        return
+    rows = [{
+        "ticker": t,
+        "content": content,
+        "title": title,
+        "source": source,
+        "url": url,
+        "group_id": group_id,
+    } for t in tickers]
+    client.table("manual_notes").insert(rows).execute()
+    logger.info("updated manual note group %s for %s", group_id, tickers)
+
+
+def delete_manual_note_group(group_id: str) -> None:
+    get_client().table("manual_notes").delete().eq("group_id", group_id).execute()
+    logger.info("deleted manual note group %s", group_id)
 
 
 def insert_tweets(ticker: str, username: str, tweets: list[dict]) -> int:

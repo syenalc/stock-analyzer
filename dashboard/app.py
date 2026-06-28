@@ -18,6 +18,10 @@ from db.supabase_client import (
     fetch_latest_tweets_for_ticker,
     fetch_manual_notes,
     insert_manual_note,
+    insert_manual_note_group,
+    fetch_all_manual_notes_grouped,
+    update_manual_note_group,
+    delete_manual_note_group,
     create_chat_session,
     update_chat_session,
     list_chat_sessions,
@@ -124,7 +128,7 @@ with st.sidebar:
     st.subheader("📊 詳細ビュー")
     view_ticker = st.selectbox("銘柄選択", TICKERS)
 
-tab_chat, tab_data, tab_notes = st.tabs(["💬 AIに質問", "📊 データ閲覧", "📝 メモ追加"])
+tab_chat, tab_data, tab_notes = st.tabs(["💬 AIに質問", "📊 データ閲覧", "📝 メモ管理"])
 
 # ============ TAB 1: チャット ============
 with tab_chat:
@@ -221,9 +225,78 @@ with tab_data:
                     st.markdown(f"🔗 [{n['url']}]({n['url']})")
                 st.write(n["content"])
 
-# ============ TAB 3: メモ追加 ============
+# ============ TAB 3: メモ管理 ============
+SOURCE_OPTIONS = ["article", "blog", "report", "memo", "other"]
+
 with tab_notes:
-    st.subheader("📝 手動メモを追加")
+    st.subheader("📚 保存済みメモ一覧")
+    filter_ticker = st.selectbox("銘柄フィルタ", ["全銘柄"] + TICKERS, key="note_filter")
+    try:
+        groups = fetch_all_manual_notes_grouped(limit=200)
+    except Exception as e:
+        groups = []
+        st.error(f"メモ取得失敗: {e}")
+    if filter_ticker != "全銘柄":
+        groups = [g for g in groups if filter_ticker in g["tickers"]]
+
+    if not groups:
+        st.info("該当メモなし。下のフォームから追加してください。")
+    else:
+        st.caption(f"{len(groups)} 件")
+        for g in groups:
+            gid = g["group_id"]
+            label = f"{g['title'] or '(無題)'} — {(g['added_at'] or '')[:16]} [{', '.join(g['tickers'])}]"
+            with st.expander(label):
+                edit_key = f"edit_{gid}"
+                if st.session_state.get(edit_key, False):
+                    new_tickers = st.multiselect(
+                        "対象銘柄", TICKERS, default=g["tickers"], key=f"et_{gid}"
+                    )
+                    new_title = st.text_input("タイトル", value=g["title"] or "", key=f"eti_{gid}")
+                    new_url = st.text_input("URL", value=g["url"] or "", key=f"eu_{gid}")
+                    src_idx = SOURCE_OPTIONS.index(g["source"]) if g["source"] in SOURCE_OPTIONS else 3
+                    new_source = st.selectbox(
+                        "ソース", SOURCE_OPTIONS, index=src_idx, key=f"es_{gid}"
+                    )
+                    new_content = st.text_area("内容", value=g["content"] or "", height=200, key=f"ec_{gid}")
+                    c1, c2 = st.columns(2)
+                    if c1.button("💾 保存", key=f"sv_{gid}", type="primary"):
+                        if not new_content.strip():
+                            st.error("内容は必須です")
+                        elif not new_tickers:
+                            st.error("銘柄を1つ以上選択してください")
+                        else:
+                            try:
+                                update_manual_note_group(
+                                    gid, new_tickers, new_content.strip(),
+                                    new_title.strip(), new_source, new_url.strip(),
+                                )
+                                st.session_state[edit_key] = False
+                                st.success("更新しました")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"更新失敗: {e}")
+                    if c2.button("キャンセル", key=f"cn_{gid}"):
+                        st.session_state[edit_key] = False
+                        st.rerun()
+                else:
+                    if g["url"]:
+                        st.markdown(f"🔗 [{g['url']}]({g['url']})")
+                    st.caption(f"ソース: {g['source']}")
+                    st.write(g["content"])
+                    c1, c2 = st.columns(2)
+                    if c1.button("✏️ 編集", key=f"ed_{gid}"):
+                        st.session_state[edit_key] = True
+                        st.rerun()
+                    if c2.button("🗑 削除", key=f"dl_{gid}"):
+                        try:
+                            delete_manual_note_group(gid)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"削除失敗: {e}")
+
+    st.divider()
+    st.subheader("➕ 新規メモを追加")
     st.caption("ネット記事の要約や自分の調査メモを保存。チャットで参照される。")
     with st.form("note_form", clear_on_submit=True):
         note_tickers = st.multiselect(
@@ -235,7 +308,7 @@ with tab_notes:
         )
         note_title = st.text_input("タイトル（任意）")
         note_url = st.text_input("URL（任意）")
-        note_source = st.selectbox("ソース種別", ["article", "blog", "report", "memo", "other"])
+        note_source = st.selectbox("ソース種別", SOURCE_OPTIONS)
         note_content = st.text_area("内容（必須）", height=200)
         if st.form_submit_button("💾 保存", type="primary"):
             if not note_content.strip():
@@ -243,21 +316,14 @@ with tab_notes:
             elif not note_tickers:
                 st.error("対象銘柄を1つ以上選択してください")
             else:
-                errors = []
-                saved = []
-                for tk in note_tickers:
-                    try:
-                        insert_manual_note(
-                            ticker=tk,
-                            content=note_content.strip(),
-                            title=note_title.strip(),
-                            url=note_url.strip(),
-                            source=note_source,
-                        )
-                        saved.append(tk)
-                    except Exception as e:
-                        errors.append(f"{tk}: {e}")
-                if saved:
-                    st.success(f"{', '.join(saved)} にメモを追加しました")
-                if errors:
-                    st.error("一部失敗: " + " / ".join(errors))
+                try:
+                    insert_manual_note_group(
+                        tickers=note_tickers,
+                        content=note_content.strip(),
+                        title=note_title.strip(),
+                        url=note_url.strip(),
+                        source=note_source,
+                    )
+                    st.success(f"{', '.join(note_tickers)} にメモを追加しました")
+                except Exception as e:
+                    st.error(f"保存失敗: {e}")
