@@ -129,23 +129,36 @@ with st.sidebar:
 tab_chat, tab_data, tab_notes = st.tabs(["💬 AIに質問", "📊 データ閲覧", "📝 メモ管理"])
 
 # ============ TAB 1: チャット ============
+MAX_PREVIEW_LINES = 5
+
+
+def render_truncated(text: str, key: str) -> None:
+    lines = (text or "").split("\n")
+    if len(lines) <= MAX_PREVIEW_LINES:
+        st.markdown(text)
+        return
+    st.markdown("\n".join(lines[:MAX_PREVIEW_LINES]))
+    with st.expander(f"📖 全部表示（あと{len(lines) - MAX_PREVIEW_LINES}行）"):
+        st.markdown("\n".join(lines[MAX_PREVIEW_LINES:]))
+
+
 with tab_chat:
     st.caption("💡 質問例: 「SNDUどう思う?」「@elonmuskの今日のツイート取って」「MUUの株価は？」")
 
-    for msg in st.session_state.chat_history:
+    for idx, msg in enumerate(st.session_state.chat_history):
         if msg["role"] == "user":
             with st.chat_message("user"):
-                st.markdown(msg["display"])
+                render_truncated(msg["display"], key=f"u_{idx}")
         elif msg["role"] == "assistant_display":
             with st.chat_message("assistant"):
-                st.markdown(msg["display"])
+                render_truncated(msg["display"], key=f"a_{idx}")
                 if msg.get("tools"):
                     st.caption(f"🔧 使用ツール: {', '.join(msg['tools'])}")
 
     if prompt := st.chat_input("質問を入力..."):
         st.session_state.chat_history.append({"role": "user", "display": prompt})
         with st.chat_message("user"):
-            st.markdown(prompt)
+            render_truncated(prompt, key="u_new")
 
         # Anthropic用のhistoryを構築
         api_history = st.session_state.get("api_history", [])
