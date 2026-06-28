@@ -162,3 +162,36 @@ def fetch_backtest_results(ticker: Optional[str] = None, limit: int = 50) -> lis
         q = q.eq("ticker", ticker)
     res = q.order("run_at", desc=True).limit(limit).execute()
     return res.data or []
+
+
+def create_chat_session(title: str, chat_history: list, api_history: list) -> dict:
+    row = {
+        "title": title[:80],
+        "chat_history": chat_history,
+        "api_history": api_history,
+    }
+    res = get_client().table("chat_sessions").insert(row).execute()
+    return res.data[0] if res.data else row
+
+
+def update_chat_session(session_id: int, chat_history: list, api_history: list) -> None:
+    get_client().table("chat_sessions").update({
+        "chat_history": chat_history,
+        "api_history": api_history,
+        "updated_at": datetime.utcnow().isoformat(),
+    }).eq("id", session_id).execute()
+
+
+def list_chat_sessions(limit: int = 30) -> list[dict]:
+    res = get_client().table("chat_sessions").select("id,title,updated_at")\
+        .order("updated_at", desc=True).limit(limit).execute()
+    return res.data or []
+
+
+def get_chat_session(session_id: int) -> Optional[dict]:
+    res = get_client().table("chat_sessions").select("*").eq("id", session_id).execute()
+    return res.data[0] if res.data else None
+
+
+def delete_chat_session(session_id: int) -> None:
+    get_client().table("chat_sessions").delete().eq("id", session_id).execute()
