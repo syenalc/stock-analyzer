@@ -129,6 +129,40 @@ with st.sidebar:
 tab_chat, tab_data, tab_notes = st.tabs(["💬 AIに質問", "📊 データ閲覧", "📝 メモ管理"])
 
 # ============ TAB 1: チャット ============
+st.markdown(
+    """
+<style>
+#scroll-to-bottom-btn {
+  position: fixed;
+  bottom: 110px;
+  right: 18px;
+  z-index: 9999;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  line-height: 44px;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  opacity: 0.85;
+  padding: 0;
+}
+#scroll-to-bottom-btn:hover { opacity: 1; }
+</style>
+<button id="scroll-to-bottom-btn"
+        title="一番下へ"
+        onclick="(window.parent || window).scrollTo({top: 1e9, behavior: 'smooth'});
+                 var d=(window.parent || window).document;
+                 var main=d.querySelector('section.main') || d.querySelector('[data-testid=\\'stAppViewContainer\\']');
+                 if(main) main.scrollTo({top: 1e9, behavior: 'smooth'});">↓</button>
+""",
+    unsafe_allow_html=True,
+)
+
 MAX_PREVIEW_LINES = 5
 
 
